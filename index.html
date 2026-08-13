@@ -68,10 +68,10 @@
       font-size: 12px; color: var(--text-dim);
     }
     .pane-head strong { color: var(--accent-2); font-size: 13px; letter-spacing: 0.05em; }
-    /* Canary — RGB rotation (feedback_canary_rotation). Currently BLUE
-       (live progress checkpoints in source pane + localStorage crash
-       trail 2026-08-13); next rotation = red. */
-    #source-pane-label { background: #4080ff; color: #fff; padding: 2px 8px; border-radius: 3px; }
+    /* Canary — RGB rotation (feedback_canary_rotation). Currently RED
+       (force-WASM only, skip WebGPU attempt; explicit WebGPU success
+       message added 2026-08-13); next rotation = green. */
+    #source-pane-label { background: #ff4444; color: #fff; padding: 2px 8px; border-radius: 3px; }
     .pane-head select {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 3px;
@@ -992,22 +992,20 @@
           const { pipeline, env } = mod;
           env.allowLocalModels = false;
           env.useBrowserCache  = true;
-          progress('install: pipeline() with webgpu — starting');
+          // 2026-08-13 — FORCE WASM. iOS Safari 26 was crashing the tab
+          // during WebGPU init (before WASM fallback got a chance).
+          // WebGPU is optional and often less stable on mobile; WASM is
+          // the mature, well-supported path. Can add a `?backend=webgpu`
+          // opt-in later if we want it on desktop.
+          progress('install: pipeline() forcing WASM — starting');
           this.pipeline = await pipeline(
             'automatic-speech-recognition',
             'onnx-community/whisper-tiny.en',
-            { device: 'webgpu' }
-          ).catch(async (e) => {
-            progress('install: webgpu failed, retrying with wasm', e && e.message);
-            return pipeline(
-              'automatic-speech-recognition',
-              'onnx-community/whisper-tiny.en',
-              { device: 'wasm' }
-            );
-          });
-          progress('install: pipeline() resolved — model loaded');
-          setStatus('Whisper ready', 'ok');
-          logEntry(`Whisper loaded, backend: ${this.pipeline.model.session?.handler?.name || 'unknown'}`, 'info');
+            { device: 'wasm' }
+          );
+          progress('install: pipeline() resolved — model loaded (WASM)');
+          setStatus('Whisper ready (WASM)', 'ok');
+          logEntry(`Whisper loaded — WASM backend confirmed`, 'info');
           return true;
         } catch (err) {
           progress('install: ERROR', err && err.message);
