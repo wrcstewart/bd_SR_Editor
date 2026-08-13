@@ -68,10 +68,10 @@
       font-size: 12px; color: var(--text-dim);
     }
     .pane-head strong { color: var(--accent-2); font-size: 13px; letter-spacing: 0.05em; }
-    /* Canary — RGB rotation (feedback_canary_rotation). Currently RED
-       (log + status readable on iPhone: white text, larger font,
-       taller max-height, 2026-08-13); next rotation = green. */
-    #source-pane-label { background: #d03030; color: #fff; padding: 2px 8px; border-radius: 3px; }
+    /* Canary — RGB rotation (feedback_canary_rotation). Currently GREEN
+       (STANDALONE diverged: whisper-tiny.en + memory diagnostic,
+       2026-08-13); next rotation = blue. */
+    #source-pane-label { background: #40c040; color: #fff; padding: 2px 8px; border-radius: 3px; }
     .pane-head select {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 3px;
@@ -988,7 +988,7 @@
         // textarea. Accept button strips markers. This is a "tentative
         // suggestion" markdown that may find other uses in BD (e.g. chat
         // messaging where a proposed rewording needs partner approval).
-        setStatus('Loading Whisper base.en (~74 MB, one-time)…', '');
+        setStatus('Loading Whisper tiny.en (~40 MB, one-time)…', '');
         try {
           const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
           const { pipeline, env } = mod;
@@ -997,14 +997,14 @@
           env.useBrowserCache  = true;
           this.pipeline = await pipeline(
             'automatic-speech-recognition',
-            'onnx-community/whisper-base.en',
+            'onnx-community/whisper-tiny.en',
             { device: 'webgpu' }   // transformers.js falls back to wasm if webgpu unavailable
           ).catch(async (e) => {
             // WebGPU init can fail on Safari; retry with wasm explicitly.
             console.warn('WebGPU pipeline failed, retrying with wasm:', e);
             return pipeline(
               'automatic-speech-recognition',
-              'onnx-community/whisper-base.en',
+              'onnx-community/whisper-tiny.en',
               { device: 'wasm' }
             );
           });
@@ -1892,7 +1892,7 @@
     // this call could be deferred (guarded by e.g. a "load-on-demand"
     // flag) since Whisper's 74 MB weight isn't free on cellular.
     async function boot() {
-      logEntry('BD Speech Editor v0.1 booted (three-state hybrid + stale-event guard · substitute {?…} · 2026-08-13)', 'info');
+      logEntry('BD Speech Editor v0.1 booted (STANDALONE · whisper-tiny.en · 2026-08-13)', 'info');
       logEntry(`UA: ${navigator.userAgent}`, 'info');
       const hasGetUM   = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
       const hasWorklet = !!(window.AudioContext &&
@@ -1900,6 +1900,17 @@
                             (window.AudioWorkletNode || (window.AudioContext.prototype.audioWorklet)));
       const hasWebGPU  = 'gpu' in navigator;
       logEntry(`features: getUserMedia=${hasGetUM} AudioWorklet=${hasWorklet} WebGPU=${hasWebGPU}`, 'info');
+      // Memory + device diagnostic. Safari only exposes deviceMemory
+      // (coarse RAM in GB); performance.memory is Chrome-only.
+      const memBits = [];
+      if (navigator.deviceMemory !== undefined) memBits.push(`deviceMemory=${navigator.deviceMemory}GB`);
+      if (navigator.hardwareConcurrency !== undefined) memBits.push(`cores=${navigator.hardwareConcurrency}`);
+      if (performance && performance.memory) {
+        const m = performance.memory;
+        memBits.push(`heapUsed=${(m.usedJSHeapSize/1e6).toFixed(0)}MB`);
+        memBits.push(`heapLimit=${(m.jsHeapSizeLimit/1e6).toFixed(0)}MB`);
+      }
+      logEntry(`device: ${memBits.join(' · ') || '(no info)'}`, 'info');
       if (!hasGetUM || !hasWorklet) {
         micState = 'error';
         refreshMicUI();
