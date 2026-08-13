@@ -68,23 +68,27 @@
       font-size: 12px; color: var(--text-dim);
     }
     .pane-head strong { color: var(--accent-2); font-size: 13px; letter-spacing: 0.05em; }
-    /* Canary — RGB rotation (feedback_canary_rotation). Currently RED
-       (force-WASM only, skip WebGPU attempt; explicit WebGPU success
-       message added 2026-08-13); next rotation = green. */
-    #source-pane-label { background: #ff4444; color: #fff; padding: 2px 8px; border-radius: 3px; }
+    /* Canary — RGB rotation (feedback_canary_rotation). Currently GREEN
+       (textarea iOS-scroll fix + swap back to whisper-base.en now that
+       WASM-only was verified working on iPhone 2026-08-13); next = blue. */
+    #source-pane-label { background: #4caf50; color: #fff; padding: 2px 8px; border-radius: 3px; }
     .pane-head select {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 3px;
       padding: 2px 6px; font-size: 11px; margin-left: auto;
     }
     .pane textarea {
-      flex: 1 1 auto; width: 100%;
+      flex: 1 1 auto; width: 100%; min-height: 0;
       background: #0f0f1e; color: var(--text);
       border: none; padding: 10px;
       font-family: Georgia, 'Times New Roman', serif;
       font-size: 16px;         /* ≥16px so iOS Safari doesn't auto-zoom on focus */
       line-height: 1.5;
       resize: none; outline: none;
+      /* iOS-safe scrolling for long text inside a flex column */
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
     }
     .pane textarea[readonly] { background: #0c0c18; color: #d0d0e0; }
 
@@ -945,11 +949,11 @@
     }
 
     // ── Whisper via transformers.js ──────────────────────────────────────
-    // Push-to-talk: MediaRecorder captures a whole utterance, then Whisper
-    // transcribes the buffer in one go. WebGPU where available (iPhone 15+,
-    // iPad M-series, most desktops); WASM fallback via transformers.js
-    // internals. Model: whisper-tiny.en (~40 MB, English only, fast on iOS).
-    // Swap to whisper-base.en later for accuracy if latency permits.
+    // Push-to-talk: AudioWorklet captures direct PCM, then Whisper
+    // transcribes the buffer in one go. WASM-only (WebGPU attempt was
+    // crashing iOS Safari 26). Model: whisper-base.en (~74 MB, English,
+    // more accurate than tiny.en; iPhone Safari 26 handles it fine on
+    // WASM, verified 2026-08-13).
     class WhisperEngine extends EngineAdapter {
       constructor() {
         super();
@@ -979,11 +983,11 @@
         if (this.pipeline) return true;
         if (this.loading) return false;
         this.loading = true;
-        // 2026-08-13 STANDALONE — whisper-tiny.en for iOS memory budget.
-        // Instrumented with progress() checkpoints so if iOS Safari
-        // kills the tab, we can see the last step reached (survives via
-        // localStorage across the auto-reload).
-        setStatus('Loading Whisper tiny.en (~40 MB, one-time)…', '');
+        // 2026-08-13 STANDALONE — whisper-base.en on WASM. Verified
+        // loading fine on iPhone Safari 26 once WebGPU attempt was
+        // skipped (WebGPU init was crashing the tab, not the model
+        // size). Progress() checkpoints retained as a safety net.
+        setStatus('Loading Whisper base.en (~74 MB, one-time)…', '');
         progress('install: begin');
         try {
           progress('install: importing transformers.js from CDN');
@@ -1000,7 +1004,7 @@
           progress('install: pipeline() forcing WASM — starting');
           this.pipeline = await pipeline(
             'automatic-speech-recognition',
-            'onnx-community/whisper-tiny.en',
+            'onnx-community/whisper-base.en',
             { device: 'wasm' }
           );
           progress('install: pipeline() resolved — model loaded (WASM)');
@@ -1937,7 +1941,7 @@
 
     async function boot() {
       progress('boot: start');
-      logEntry('BD Speech Editor v0.1 booted (STANDALONE · whisper-tiny.en · 2026-08-13)', 'info');
+      logEntry('BD Speech Editor v0.1 booted (STANDALONE · whisper-base.en · 2026-08-13)', 'info');
       logEntry(`UA: ${navigator.userAgent}`, 'info');
       const hasGetUM   = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
       const hasWorklet = !!(window.AudioContext &&
