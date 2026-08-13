@@ -68,10 +68,10 @@
       font-size: 12px; color: var(--text-dim);
     }
     .pane-head strong { color: var(--accent-2); font-size: 13px; letter-spacing: 0.05em; }
-    /* Canary — RGB rotation (feedback_canary_rotation). Currently GREEN
-       (STANDALONE diverged: whisper-tiny.en + memory diagnostic,
-       2026-08-13); next rotation = blue. */
-    #source-pane-label { background: #40c040; color: #fff; padding: 2px 8px; border-radius: 3px; }
+    /* Canary — RGB rotation (feedback_canary_rotation). Currently BLUE
+       (live progress checkpoints in source pane + localStorage crash
+       trail 2026-08-13); next rotation = red. */
+    #source-pane-label { background: #4080ff; color: #fff; padding: 2px 8px; border-radius: 3px; }
     .pane-head select {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 3px;
@@ -979,39 +979,38 @@
         if (this.pipeline) return true;
         if (this.loading) return false;
         this.loading = true;
-        // 2026-08-13 — REVERTED small.en → base.en. small.en gained ~2 pp
-        // accuracy (94.8% → 96.7% on Snow White) but took 18 s to
-        // transcribe 35 s of audio on WASM (~6× slower than base). base.en
-        // + planned B2 phonetic substitution should close most of the gap
-        // at ~3 s per transcription. Substitution plan (2026-08-13 user):
-        // suspect substitutions get wrapped in |?…|| markers in the
-        // textarea. Accept button strips markers. This is a "tentative
-        // suggestion" markdown that may find other uses in BD (e.g. chat
-        // messaging where a proposed rewording needs partner approval).
+        // 2026-08-13 STANDALONE — whisper-tiny.en for iOS memory budget.
+        // Instrumented with progress() checkpoints so if iOS Safari
+        // kills the tab, we can see the last step reached (survives via
+        // localStorage across the auto-reload).
         setStatus('Loading Whisper tiny.en (~40 MB, one-time)…', '');
+        progress('install: begin');
         try {
+          progress('install: importing transformers.js from CDN');
           const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+          progress('install: transformers.js imported');
           const { pipeline, env } = mod;
-          // Cache model files in the browser between sessions.
           env.allowLocalModels = false;
           env.useBrowserCache  = true;
+          progress('install: pipeline() with webgpu — starting');
           this.pipeline = await pipeline(
             'automatic-speech-recognition',
             'onnx-community/whisper-tiny.en',
-            { device: 'webgpu' }   // transformers.js falls back to wasm if webgpu unavailable
+            { device: 'webgpu' }
           ).catch(async (e) => {
-            // WebGPU init can fail on Safari; retry with wasm explicitly.
-            console.warn('WebGPU pipeline failed, retrying with wasm:', e);
+            progress('install: webgpu failed, retrying with wasm', e && e.message);
             return pipeline(
               'automatic-speech-recognition',
               'onnx-community/whisper-tiny.en',
               { device: 'wasm' }
             );
           });
+          progress('install: pipeline() resolved — model loaded');
           setStatus('Whisper ready', 'ok');
           logEntry(`Whisper loaded, backend: ${this.pipeline.model.session?.handler?.name || 'unknown'}`, 'info');
           return true;
         } catch (err) {
+          progress('install: ERROR', err && err.message);
           console.error('Whisper install failed', err);
           setStatus('Whisper load failed: ' + err.message, 'err');
           logEntry('install error: ' + err.message, 'err');
@@ -1891,7 +1890,55 @@
     // waiting the first time they tap the mic. When BD-integrated later,
     // this call could be deferred (guarded by e.g. a "load-on-demand"
     // flag) since Whisper's 74 MB weight isn't free on cellular.
+
+    // Progress tracer — writes each checkpoint to:
+    //   (a) the console
+    //   (b) the source pane (visible even if tab is about to crash)
+    //   (c) localStorage (survives tab crashes / auto-reloads so the
+    //       NEXT session can report the last step the previous session
+    //       reached — pinpoints where the crash happened).
+    const PROG_KEY = 'sr_editor_last_progress';
+    function progress(step, detail) {
+      const now  = performance.now();
+      const line = `[${(now/1000).toFixed(2)}s] ${step}${detail ? ' — ' + detail : ''}`;
+      console.log('[progress] ' + line);
+      try { localStorage.setItem(PROG_KEY, line); } catch (_) {}
+      // Append to source pane. Only touches source pane if the user
+      // hasn't loaded a corpus (otherwise it'd overwrite their text).
+      try {
+        const src = $('source-pane');
+        if (src && (src.value === '' || src.getAttribute('data-progress-mode') === 'true')) {
+          src.setAttribute('data-progress-mode', 'true');
+          src.value = (src.value ? src.value + '\n' : '') + line;
+          src.scrollTop = src.scrollHeight;
+        }
+      } catch (_) {}
+    }
+    function clearProgress() {
+      try { localStorage.removeItem(PROG_KEY); } catch (_) {}
+      const src = $('source-pane');
+      if (src && src.getAttribute('data-progress-mode') === 'true') {
+        src.value = '';
+        src.removeAttribute('data-progress-mode');
+      }
+    }
+    // On boot, display the previous session's last checkpoint (if any)
+    // so a crash+auto-reload leaves visible evidence of where it died.
+    (function reportPreviousCrash() {
+      let prev = null;
+      try { prev = localStorage.getItem(PROG_KEY); } catch (_) {}
+      if (prev) {
+        const src = $('source-pane');
+        if (src) {
+          src.setAttribute('data-progress-mode', 'true');
+          src.value = 'PREVIOUS SESSION last-reached checkpoint:\n' + prev + '\n\n(if this reads like the tab crashed, that\'s where it died)\n\n';
+        }
+        try { localStorage.removeItem(PROG_KEY); } catch (_) {}
+      }
+    })();
+
     async function boot() {
+      progress('boot: start');
       logEntry('BD Speech Editor v0.1 booted (STANDALONE · whisper-tiny.en · 2026-08-13)', 'info');
       logEntry(`UA: ${navigator.userAgent}`, 'info');
       const hasGetUM   = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -1911,28 +1958,33 @@
         memBits.push(`heapLimit=${(m.jsHeapSizeLimit/1e6).toFixed(0)}MB`);
       }
       logEntry(`device: ${memBits.join(' · ') || '(no info)'}`, 'info');
+      progress('boot: features checked', `getUserMedia=${hasGetUM} worklet=${hasWorklet} webgpu=${hasWebGPU}`);
       if (!hasGetUM || !hasWorklet) {
         micState = 'error';
         refreshMicUI();
         setStatus('This browser lacks microphone or AudioWorklet support.', 'err');
         return;
       }
+      progress('boot: about to install engine');
       micState = 'loading';
       refreshMicUI();
       const ok = await engine.install();
       if (!ok) {
+        progress('boot: install returned false');
         micState = 'error';
         refreshMicUI();
         return;   // status already set by engine.install() on failure
       }
-      // If we already have permission from a prior page in this browser
-      // session, useMic could be pre-set true. For simplicity always
-      // start in need-permission and let the first click check via
-      // getUserMedia (permission if remembered will just resolve fast).
+      progress('boot: engine installed');
       micState = 'need-permission';
       refreshMicUI();
       micBtn.focus();
       setStatus('Model loaded. Click "Use Mic" to enable the microphone.', 'ok');
+      progress('boot: complete — awaiting Use Mic click');
+      // Full success — clear the progress trace + reset source pane if we
+      // were using it for progress reporting, so the user can now paste
+      // their corpus text into a clean source pane.
+      setTimeout(() => clearProgress(), 500);
     }
     boot();
   </script>
