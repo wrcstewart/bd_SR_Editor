@@ -68,10 +68,10 @@
       font-size: 12px; color: var(--text-dim);
     }
     .pane-head strong { color: var(--accent-2); font-size: 13px; letter-spacing: 0.05em; }
-    /* Canary — RGB rotation (feedback_canary_rotation). Currently GREEN
-       (textarea iOS-scroll fix + swap back to whisper-base.en now that
-       WASM-only was verified working on iPhone 2026-08-13); next = blue. */
-    #source-pane-label { background: #4caf50; color: #fff; padding: 2px 8px; border-radius: 3px; }
+    /* Canary — RGB rotation (feedback_canary_rotation). Currently BLUE
+       (2026-08-15 mic-primer panel — appears on Use Mic press, hides on
+       browser accept/deny). Next = red. */
+    #source-pane-label { background: #4080ff; color: #fff; padding: 2px 8px; border-radius: 3px; }
     .pane-head select {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 3px;
@@ -117,9 +117,44 @@
     #final-text { color: var(--text); }
 
     #control-bar {
+      /* 2026-08-15 — position:relative so #mic-primer (absolute) anchors
+         inside this bar and floats to the right of the mic button. */
+      position: relative;
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 4px; padding: 8px 10px;
       display: flex; gap: 10px; align-items: center;
+    }
+    /* 2026-08-15 — one-shot mic primer. Shows the moment the user presses
+       Use Mic and hides on browser-prompt resolution (accept or deny).
+       Deliberately overlays whatever sibling buttons happen to sit to the
+       right of the mic button — the message matters more than those
+       controls do at this instant. Non-modal, no click needed to dismiss. */
+    #mic-primer {
+      position: absolute;
+      left: 195px;                     /* mic button min-width 180 + gap 10 + a bit */
+      top: 6px;
+      right: 6px;                      /* stretch to right edge on narrow viewports */
+      max-width: 460px;                /* cap on desktop so line-length stays readable */
+      min-height: 44px;
+      padding: 8px 12px;
+      background: rgba(0, 40, 90, 0.95);
+      border: 1px solid #4080ff;
+      border-radius: 6px;
+      color: #ffffff;
+      font-family: sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      z-index: 20;
+      pointer-events: none;            /* user shouldn't need to interact with it */
+    }
+    #mic-primer[hidden] { display: none; }
+    @media (max-width: 600px) {
+      /* Phone: mic button wraps close to the left; primer sits below its
+         row rather than to the right (no horizontal room for both). */
+      #mic-primer {
+        left: 6px; top: auto; bottom: -80px; right: 6px;
+        font-size: 12px;
+      }
     }
     #control-bar button {
       background: var(--panel-2); color: var(--text);
@@ -331,6 +366,17 @@
       <button id="undo-btn" type="button" title="Undo last insertion (browser undo)">Undo</button>
       <button id="accept-subs-btn" type="button" title="Strip {?…} tentative-substitution markers throughout the destination pane">Accept {?…}</button>
       <div id="status">initialising…</div>
+      <!-- 2026-08-15 — mic primer. Shown when user presses Use Mic; hidden
+           on browser accept/deny. Copy chosen 2026-08-15 discussion:
+           tell the user what's about to happen AND give sentence-length
+           guidance in the same moment. Auto-vanishes; nothing to dismiss. -->
+      <div id="mic-primer" hidden aria-live="polite">
+        Your browser is about to ask permission for the microphone — tap
+        <strong>Allow</strong>.<br><br>
+        Then dictate <strong>one sentence at a time</strong>. The pause
+        between recordings lets you scroll the source or review what
+        landed in the destination.
+      </div>
     </div>
 
     <div id="log-panel">
@@ -1598,6 +1644,12 @@
     }
 
     async function grantMicPermission() {
+      // 2026-08-15 — show the mic primer between "Use Mic" press and the
+      // browser's accept/deny. Panel floats to the right of the mic
+      // button (or below on phones); clears in the finally block so both
+      // grant and deny paths return to normal UI without residue.
+      const primer = document.getElementById('mic-primer');
+      if (primer) primer.hidden = false;
       setStatus('Requesting microphone permission…', '');
       try {
         const s = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1615,6 +1667,8 @@
         refreshMicUI();
         setStatus('Microphone permission denied: ' + err.message, 'err');
         logEntry('mic permission denied: ' + err.message, 'err');
+      } finally {
+        if (primer) primer.hidden = true;
       }
     }
 
